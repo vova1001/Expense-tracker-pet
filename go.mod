@@ -1,4 +1,4 @@
-module github.com/vova1001/expense-tracker
+module github.com/vova1001/Expense-tracker-pet
 
 go 1.24.4
 
