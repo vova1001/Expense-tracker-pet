@@ -1,4 +1,18 @@
 services:
+
+  back:
+    build:
+      context: .
+    container_name: back
+    depends_on:
+      - db
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    command: ["./main"]
+
+
   db:
     image: postgres:15
     container_name: task_postgres

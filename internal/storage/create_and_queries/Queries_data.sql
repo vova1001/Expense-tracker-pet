@@ -1,0 +1,1 @@
+SELECT id,fio,phone,salary FROM employees;
