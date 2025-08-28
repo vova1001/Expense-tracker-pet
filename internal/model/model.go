@@ -3,13 +3,13 @@ package model
 import "time"
 
 type Task struct {
-	ID          int       `json:"id,omitempty"`
-	Name        string    `json:"name"`
-	Move        string    `json:"move"`
-	Proc        bool      `json:"proc"`
-	Time        time.Time `json:"time,omitempty"`
-	TaskDueDate time.Time `json:"duedate,omitempty"`
-	UserID      int       `json:"user_id"`
+	ID          int        `json:"id,omitempty"`
+	Name        string     `json:"name"`
+	Move        string     `json:"move"`
+	Proc        bool       `json:"proc"`
+	Time        time.Time  `json:"time,omitempty"`
+	TaskDueDate *time.Time `json:"duedate,omitempty"`
+	UserID      int        `json:"user_id"`
 }
 
 type TaskStatus struct {
@@ -28,7 +28,7 @@ type ChekBox struct {
 }
 
 type DueDate struct {
-	Due time.Time `json:"due"`
+	Due *time.Time `json:"due"`
 }
 
 type User struct {

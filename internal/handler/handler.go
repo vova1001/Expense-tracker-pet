@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -13,7 +14,7 @@ import (
 )
 
 func GetTask(userId int) ([]m.Task, error) {
-	rows, err := d.DB.Query("SELECT id, name, move, proc, time FROM tasks WHERE user_id= $1 ORDER BY id ASC", userId)
+	rows, err := d.DB.Query("SELECT id, name, move, proc, time, duedate FROM tasks WHERE user_id= $1 ORDER BY id ASC", userId)
 	if err != nil {
 		return nil, err
 	}
@@ -21,7 +22,7 @@ func GetTask(userId int) ([]m.Task, error) {
 	var tasks []m.Task
 	for rows.Next() {
 		var t m.Task
-		err := rows.Scan(&t.ID, &t.Name, &t.Move, &t.Proc, &t.Time)
+		err := rows.Scan(&t.ID, &t.Name, &t.Move, &t.Proc, &t.Time, &t.TaskDueDate)
 		if err != nil {
 			return nil, err
 		}
@@ -29,6 +30,106 @@ func GetTask(userId int) ([]m.Task, error) {
 	}
 	return tasks, nil
 
+}
+
+func GetTaskParam(userId int, pageStr, limitStr, proc, periodStr, searchStr string) ([]m.Task, error) {
+	var tasks []m.Task
+	var rows *sql.Rows
+	var err error
+
+	if proc == "done" && periodStr == "" {
+		query := "SELECT id, name, move, proc, time, duedate FROM tasks WHERE user_id=$1 AND proc=TRUE"
+		if searchStr != "" {
+			query += " AND move ILIKE '%' || $2 || '%'"
+			rows, err = d.DB.Query(query, userId, searchStr)
+		} else {
+			rows, err = d.DB.Query(query, userId)
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var t m.Task
+			err := rows.Scan(&t.ID, &t.Name, &t.Move, &t.Proc, &t.Time, &t.TaskDueDate)
+			if err != nil {
+				return nil, err
+			}
+			tasks = append(tasks, t)
+		}
+		log.Printf("[DONE] user=%d tasks=%v\n", userId, tasks)
+		return tasks, nil
+	}
+
+	if proc == "not_done" {
+		var query string
+		switch periodStr {
+		case "duedate":
+			query = `
+                SELECT id, name, move, proc, time, duedate
+                FROM tasks
+                WHERE user_id=$1
+                  AND proc=FALSE
+                  AND duedate < NOW()`
+		case "today":
+			query = `
+				SELECT id, name, move, proc, time, duedate
+				FROM tasks
+				WHERE user_id=$1
+				  AND proc=FALSE
+				  AND duedate >= NOW()
+				  AND duedate < CURRENT_DATE + INTERVAL '1 day'`
+		case "oneweek":
+			query = `
+                SELECT id, name, move, proc, time, duedate
+                FROM tasks
+                WHERE user_id=$1
+                  AND proc=FALSE
+                  AND duedate >= CURRENT_DATE + INTERVAL '1 day'
+                  AND duedate <= CURRENT_DATE + INTERVAL '7 days'`
+		case "twoweek":
+			query = `
+				SELECT id, name, move, proc, time, duedate
+				FROM tasks
+				WHERE user_id=$1
+				  AND proc=FALSE
+				  AND duedate > CURRENT_DATE + INTERVAL '7 days'`
+		case "noduedate":
+			query = `
+                SELECT id, name, move, proc, time, duedate
+                FROM tasks
+                WHERE user_id=$1
+                  AND proc=FALSE
+                  AND duedate IS NULL`
+		default:
+			return nil, fmt.Errorf("invalid period")
+		}
+
+		if searchStr != "" {
+			query += " AND move ILIKE '%' || $2 || '%'"
+			rows, err = d.DB.Query(query, userId, searchStr)
+		} else {
+			rows, err = d.DB.Query(query, userId)
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var t m.Task
+			err := rows.Scan(&t.ID, &t.Name, &t.Move, &t.Proc, &t.Time, &t.TaskDueDate)
+			if err != nil {
+				return nil, err
+			}
+			tasks = append(tasks, t)
+		}
+		log.Printf("[NOT_DONE] user=%d period=%s search=%s tasks=%v\n", userId, periodStr, searchStr, tasks)
+		return tasks, nil
+	}
+
+	return tasks, nil
 }
 
 func PostTask(Newtask m.Task, userId int) ([]m.Task, error) {
@@ -40,7 +141,7 @@ func PostTask(Newtask m.Task, userId int) ([]m.Task, error) {
 		move TEXT NOT NULL,
 		proc BOOLEAN DEFAULT FALSE,
 		time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		duedate TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		duedate TIMESTAMP WITH TIME ZONE
 	);`
 	_, err := d.DB.Exec(createTable)
 	if err != nil {
@@ -187,18 +288,18 @@ func RegisterUser(user m.User) error {
 	return nil
 }
 
-func Login(user m.User) (error, m.Token) {
+func Login(user m.User) (m.Token, error) {
 	var userID int
 	var userPass string
 	var userEmail string
 	var resultToken m.Token
 	err := d.DB.QueryRow("SELECT id, password, email FROM users WHERE email = $1", user.Email).Scan(&userID, &userPass, &userEmail)
 	if err != nil {
-		return err, m.Token{}
+		return m.Token{}, err
 	}
 	err = bcrypt.CompareHashAndPassword([]byte(userPass), []byte(user.Password))
 	if err != nil {
-		return err, m.Token{}
+		return m.Token{}, err
 	}
 	sk := os.Getenv("JWT_SECRET")
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -208,10 +309,10 @@ func Login(user m.User) (error, m.Token) {
 	})
 	SignedToken, err := token.SignedString([]byte(sk))
 	if err != nil {
-		return err, m.Token{}
+		return m.Token{}, err
 	}
 	resultToken.Token = SignedToken
-	return nil, resultToken
+	return resultToken, nil
 }
 
 func EmailCheck(email string) bool {
@@ -236,24 +337,28 @@ func TaskStatus(user_id int) (m.TaskStatus, error) {
 		return m.TaskStatus{}, err
 	}
 	defer rows.Close()
+
 	var StatusTasks m.TaskStatus
+	t := time.Now()
 	for rows.Next() {
 		StatusTasks.AllTasks++
 		var proc bool
-		var duedate time.Time
-		t := time.Now()
+		var duedate *time.Time
+
 		err := rows.Scan(&proc, &duedate)
 		if err != nil {
 			return m.TaskStatus{}, err
 		}
+
 		if proc {
 			StatusTasks.CompletedTasks++
 		} else {
 			StatusTasks.ActiveTasks++
-			if t.After(duedate) {
+			if duedate != nil && t.After(*duedate) {
 				StatusTasks.OverdueTasks++
 			}
 		}
 	}
-	return StatusTasks, err
+
+	return StatusTasks, nil
 }

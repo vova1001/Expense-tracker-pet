@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -22,13 +23,30 @@ func GET_JSON(ctx *gin.Context) {
 	}
 	userIdInt := userId.(int)
 
+	procStr := ctx.Query("proc")
+	limitStr := ctx.Query("limit")
+	pageStr := ctx.Query("page")
+	periodStr := ctx.Query("period")
+	searchStr := ctx.Query("search")
+
+	ok := ChekParam(procStr, limitStr, pageStr, periodStr, searchStr)
+	if ok {
+		TasksParam, err := h.GetTaskParam(userIdInt, pageStr, limitStr, procStr, periodStr, searchStr)
+		if err != nil {
+			log.Println("Error in GetTaskParam:", err)
+			ctx.JSON(400, gin.H{"err": "err TaskParam"})
+			return
+		}
+		ctx.JSON(200, TasksParam)
+		return
+	}
+
 	task, msg := h.GetTask(userIdInt)
 	if len(task) == 0 {
 		ctx.JSON(http.StatusOK, msg)
 		return
 	}
 	ctx.JSON(http.StatusOK, task)
-
 }
 
 func POST_JSON(ctx *gin.Context) {
@@ -207,7 +225,7 @@ func Login_JSON(ctx *gin.Context) {
 	if err != nil {
 		ctx.JSON(400, gin.H{"err": "Invalid JSON"})
 	}
-	err, token := h.Login(user)
+	token, err := h.Login(user)
 	if err != nil {
 		ctx.JSON(401, gin.H{"err": err.Error()})
 	}
@@ -275,4 +293,11 @@ func TaskStatus_JSON(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(200, Result)
+}
+
+func ChekParam(proc, limit, page, periodStr, searchStr string) bool {
+	if proc != "" || page != "" || limit != "" || periodStr != "" || searchStr != "" {
+		return true
+	}
+	return false
 }

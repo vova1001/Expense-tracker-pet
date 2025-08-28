@@ -39,5 +39,9 @@ func InitDB() {
 		log.Fatal("ping failed", err)
 	}
 	fmt.Println("Connection to DB successful")
+	_, err = DB.Exec("SET TIME ZONE 'Europe/Moscow'")
+	if err != nil {
+		log.Fatal("Не удалось установить часовой пояс: ", err)
+	}
 
 }
